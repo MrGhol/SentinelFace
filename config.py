@@ -52,8 +52,8 @@ class Config:
 
     # ── Adaptive FPS ──────────────────────────────────────────────────────────
     target_fps:         float = 25.0
-    detect_every_n:     int   = 1
-    detect_every_n_max: int   = 4
+    detect_every_n:     int   = 3
+    detect_every_n_max: int   = 8
 
     # ── FairFace gender/age ───────────────────────────────────────────────────
     genderage_settle_votes:  int   = 5
@@ -61,6 +61,7 @@ class Config:
     fairface_bbox_pad:       float = 0.40
     fairface_max_crop_age:   int   = 30   
     fairface_max_gate_fails: int   = 10   
+    fairface_every_n:        int   = 3
     fairface_male_class_indices: tuple = ()
 
     # ── SCRFD detector ────────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ class Config:
         _range("fairface_bbox_pad",       self.fairface_bbox_pad,       0.0, None)
         _positive_int("fairface_max_crop_age",   self.fairface_max_crop_age, allow_zero=True)
         _positive_int("fairface_max_gate_fails", self.fairface_max_gate_fails, allow_zero=True)
+        _positive_int("fairface_every_n",        self.fairface_every_n)
 
         # SCRFD detector
         if (not isinstance(self.scrfd_input_size, tuple)
