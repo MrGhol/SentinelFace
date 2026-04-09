@@ -65,7 +65,13 @@ class VideoWorker(QThread):
         self._source = source
 
     def toggle_debug(self) -> None: self.debug_mode = not self.debug_mode
-    def stop(self)         -> None: self.state.running = False; self.wait()
+    def stop(self, timeout_ms: int = 1500) -> None:
+        self.state.running = False
+        self.requestInterruption()
+        if self.isRunning():
+            if not self.wait(timeout_ms):
+                logger.warning("VideoWorker stop timed out; thread still running.")
+                self.worker_warning.emit("Stop taking too long â€” shutting down in background.")
 
     def _load_models(self, force_cpu: bool = False) -> bool:
         plan = (
@@ -198,6 +204,8 @@ class VideoWorker(QThread):
         last_frame_hash = _frame_hash(frame)
 
         while self.state.running:
+            if self.isInterruptionRequested():
+                break
             if stall_timeout > 0 and is_camera:
                 elapsed = time.monotonic() - last_frame_ts
                 if elapsed > stall_timeout:
