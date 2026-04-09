@@ -42,6 +42,12 @@ config.json
 enrolled_faces/
 my_face.npy
 
+# Model binaries (keep large files out of git)
+models/**/*.onnx
+models/**/*.pt
+models/**/*.pth
+models/**/*.zip
+
 # OS / editor
 .DS_Store
 Thumbs.db
