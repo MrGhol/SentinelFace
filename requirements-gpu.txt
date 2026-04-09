@@ -1,0 +1,6 @@
+numpy
+opencv-python
+onnxruntime-gpu
+PySide6
+psutil
+scipy

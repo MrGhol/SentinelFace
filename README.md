@@ -20,6 +20,24 @@ FairFace for age & gender classification
 
 The UI and ML pipeline are cleanly decoupled to ensure responsiveness under real-time load.
 
+Installation
+
+CPU install:
+
+```bash
+pip install -r requirements-cpu.txt
+```
+
+GPU install:
+
+```bash
+pip install -r requirements-gpu.txt
+```
+
+Notes:
+GPU inference requires a compatible NVIDIA driver and CUDA runtime for `onnxruntime-gpu`.
+If GPU is unavailable at runtime, the app will fall back to CPU automatically.
+
 Architecture Overview
 SentinelFace/
 ├── main.py
