@@ -235,10 +235,19 @@ class MainWindow(QWidget):
         preview.setWindowTitle("Enrollment Preview"); preview.show()
         name, ok = QInputDialog.getText(self, "Enrollment", "Name for this face:")
         preview.close()
-        if ok and name.strip():
-            self.db.enroll(name.strip(), emb)
-            QMessageBox.information(self, "Enroll", f"'{name.strip()}' enrolled successfully.")
-            self._status.showMessage(f"Enrolled: {name.strip()}")
+        raw_name = name.strip()
+        if ok and raw_name:
+            try:
+                safe_name = self.db.enroll(raw_name, emb)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Enroll", str(exc))
+                return
+            if safe_name != raw_name:
+                QMessageBox.information(
+                    self, "Enroll", f"'{raw_name}' enrolled as '{safe_name}'.")
+            else:
+                QMessageBox.information(self, "Enroll", f"'{safe_name}' enrolled successfully.")
+            self._status.showMessage(f"Enrolled: {safe_name}")
 
     def _on_last_good_det(self, det: tuple) -> None: 
         self._last_good_det = det
