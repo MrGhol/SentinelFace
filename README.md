@@ -38,6 +38,10 @@ Notes:
 GPU inference requires a compatible NVIDIA driver and CUDA runtime for `onnxruntime-gpu`.
 If GPU is unavailable at runtime, the app will fall back to CPU automatically.
 
+Models:
+Model binaries are not included in this repo. See `models/README.md` for download links
+and required file placement.
+
 Architecture Overview
 SentinelFace/
 ├── main.py
