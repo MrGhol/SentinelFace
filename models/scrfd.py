@@ -32,6 +32,9 @@ class SCRFD:
         self.inp_name = self.session.get_inputs()[0].name
         self.strides  = [8, 16, 32]
         self.n_anch   = 2
+        self._anchors_cache: Dict[int, np.ndarray] = {}
+        for s in self.strides:
+            self._anchors_cache[s] = self._build_anchors(s, self.cfg.scrfd_input_size)
         self.STRIDE_OUTPUTS = self._resolve_outputs()
         validate_model_shapes(self.session, "SCRFD",
                                [("", [-1, 3, -1, -1])], 9)
@@ -125,12 +128,19 @@ class SCRFD:
                 results.append((box, kp, float(scores[i])))
         return results
 
-    def _anchors(self, stride: int, input_size: Tuple[int, int]) -> np.ndarray:
+    def _build_anchors(self, stride: int, input_size: Tuple[int, int]) -> np.ndarray:
         tw, th = input_size
         gx, gy = np.meshgrid(np.arange(tw // stride), np.arange(th // stride))
         cx = np.repeat((gx.flatten() + 0.5) * stride, self.n_anch)
         cy = np.repeat((gy.flatten() + 0.5) * stride, self.n_anch)
         return np.stack([cx, cy, np.full_like(cx, stride)], axis=1).astype(np.float32)
+
+    def _anchors(self, stride: int, input_size: Tuple[int, int]) -> np.ndarray:
+        cached = self._anchors_cache.get(stride)
+        if cached is not None:
+            return cached
+        # Fallback if called with a different input_size at runtime.
+        return self._build_anchors(stride, input_size)
 
     def _preprocess(self, rgb_img: np.ndarray) -> Tuple[np.ndarray, float, Tuple[int, int]]:
         h, w   = rgb_img.shape[:2]
