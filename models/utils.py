@@ -1,16 +1,27 @@
+from __future__ import annotations
+
 import logging
 from typing import Dict, List, Optional, Tuple
 
 try:
     import onnxruntime as ort
-except ImportError:
-    pass  # Let the main entry point handle the fatal error
+except ImportError as exc:
+    ort = None
+    _ORT_IMPORT_ERROR = exc
 
 from config import Config
 
 logger = logging.getLogger("FaceSystem.ONNX")
 
+def _require_ort() -> None:
+    if ort is None:
+        raise RuntimeError(
+            "onnxruntime is not installed. Install it to run SentinelFace "
+            "(e.g., `pip install onnxruntime` or `pip install onnxruntime-gpu`)."
+        )
+
 def build_session_options(cfg: Config) -> ort.SessionOptions:
+    _require_ort()
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     opts.intra_op_num_threads = cfg.ort_intra_threads
@@ -19,6 +30,7 @@ def build_session_options(cfg: Config) -> ort.SessionOptions:
     return opts
 
 def build_providers(cfg: Config) -> Tuple[List, Optional[Dict]]:
+    _require_ort()
     if not cfg.use_gpu:
         return ["CPUExecutionProvider"], None
     avail = ort.get_available_providers()
@@ -36,6 +48,7 @@ def build_providers(cfg: Config) -> Tuple[List, Optional[Dict]]:
 
 def make_session(model_path: str, cfg: Config,
                  providers: List, cuda_opts: Optional[Dict]) -> ort.InferenceSession:
+    _require_ort()
     opts = build_session_options(cfg)
     if cuda_opts and "CUDAExecutionProvider" in providers:
         provider_options = [cuda_opts if p == "CUDAExecutionProvider" else {}
