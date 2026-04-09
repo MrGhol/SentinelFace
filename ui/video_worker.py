@@ -295,17 +295,20 @@ class VideoWorker(QThread):
             active_tracks = self.tracker.update(detections, frame_w=out_w, frame_h=out_h)
             self.state.active_track_count = len(active_tracks)
 
-            sv  = self.cfg.genderage_settle_votes
-            mgf = self.cfg.fairface_max_gate_fails
-            for tid, _b, _e, _q, _dc in active_tracks:
-                tr = self.tracker.tracks.get(tid)
-                if tr and not tr.genderage_settled and tr.last_fairface_crop is not None:
-                    try:
-                        gender, age_grp = self.fairface.estimate(tr.last_fairface_crop)
-                    except Exception as exc:
-                        self._handle_inference_error(exc, "FairFace estimate")
-                        gender, age_grp = "?", "?"
-                    tr.apply_genderage(gender, age_grp, sv, mgf)
+            do_fairface = (self.cfg.fairface_every_n <= 1
+                           or frame_num % self.cfg.fairface_every_n == 0)
+            if do_fairface:
+                sv  = self.cfg.genderage_settle_votes
+                mgf = self.cfg.fairface_max_gate_fails
+                for tid, _b, _e, _q, _dc in active_tracks:
+                    tr = self.tracker.tracks.get(tid)
+                    if tr and not tr.genderage_settled and tr.last_fairface_crop is not None:
+                        try:
+                            gender, age_grp = self.fairface.estimate(tr.last_fairface_crop)
+                        except Exception as exc:
+                            self._handle_inference_error(exc, "FairFace estimate")
+                            gender, age_grp = "?", "?"
+                        tr.apply_genderage(gender, age_grp, sv, mgf)
 
             active_ids = set()
             sim_thr    = self.cfg.similarity_threshold
@@ -379,8 +382,8 @@ class VideoWorker(QThread):
             if len(fps_check_window) > 10:
                 mfps = len(fps_check_window) / (fps_check_window[-1] - fps_check_window[0] + 1e-9)
                 if mfps < self.cfg.target_fps * 0.85:
-                    cur_det_every = min(cur_det_every+1, self.cfg.detect_every_n_max)
-                elif mfps > self.cfg.target_fps * 1.1 and cur_det_every > 1:
+                    cur_det_every = min(cur_det_every + 1, self.cfg.detect_every_n_max)
+                elif mfps > self.cfg.target_fps * 1.1 and cur_det_every > self.cfg.detect_every_n:
                     cur_det_every -= 1
 
             metrics["total_ms"] = (time.perf_counter() - t_total) * 1000.0
