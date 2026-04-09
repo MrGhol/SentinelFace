@@ -167,6 +167,8 @@ class VideoWorker(QThread):
 
         self.tracker.reset()
         self._recog_cache    = {}
+        self.state.total_frames_processed = 0
+        self.state.total_faces_processed = 0
 
         cur_det_every    = self.cfg.detect_every_n
         fps_check_window = deque(maxlen=self.cfg.fps_avg_frames)
@@ -299,6 +301,7 @@ class VideoWorker(QThread):
                     face_sizes.append(min(bbox[2]-bbox[0], bbox[3]-bbox[1]))
             metrics["emb_ms"] = (time.perf_counter() - t_emb) * 1000.0
             metrics["faces"] += len(detections)
+            self.state.total_faces_processed += len(detections)
 
             active_tracks = self.tracker.update(detections, frame_w=out_w, frame_h=out_h)
             self.state.active_track_count = len(active_tracks)
@@ -396,6 +399,7 @@ class VideoWorker(QThread):
 
             metrics["total_ms"] = (time.perf_counter() - t_total) * 1000.0
             metrics["frames"]  += 1
+            self.state.total_frames_processed += 1
             
             if self.debug_mode and frame_num % 30 == 0:
                 logger.info(
