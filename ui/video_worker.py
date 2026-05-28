@@ -211,19 +211,21 @@ class VideoWorker(QThread):
             
         # Apply orientation transforms to first frame
         if frame is not None:
-            if self.flip_h and self.flip_v:
-                frame = cv2.flip(frame, -1)
-            elif self.flip_h:
-                frame = cv2.flip(frame, 1)
-            elif self.flip_v:
-                frame = cv2.flip(frame, 0)
-            
+            # Rotate first
             if self.rotation == 90:
                 frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             elif self.rotation == 180:
                 frame = cv2.rotate(frame, cv2.ROTATE_180)
             elif self.rotation == 270:
                 frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+            # Then flip
+            if self.flip_h and self.flip_v:
+                frame = cv2.flip(frame, -1)
+            elif self.flip_h:
+                frame = cv2.flip(frame, 1)
+            elif self.flip_v:
+                frame = cv2.flip(frame, 0)
 
         last_frame_hash = _frame_hash(frame)
 
@@ -245,19 +247,21 @@ class VideoWorker(QThread):
             
             # Apply orientation transforms to incoming frames
             if next_frame is not None:
-                if self.flip_h and self.flip_v:
-                    next_frame = cv2.flip(next_frame, -1)
-                elif self.flip_h:
-                    next_frame = cv2.flip(next_frame, 1)
-                elif self.flip_v:
-                    next_frame = cv2.flip(next_frame, 0)
-                
+                # Rotate first
                 if self.rotation == 90:
                     next_frame = cv2.rotate(next_frame, cv2.ROTATE_90_CLOCKWISE)
                 elif self.rotation == 180:
                     next_frame = cv2.rotate(next_frame, cv2.ROTATE_180)
                 elif self.rotation == 270:
                     next_frame = cv2.rotate(next_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+                # Then flip
+                if self.flip_h and self.flip_v:
+                    next_frame = cv2.flip(next_frame, -1)
+                elif self.flip_h:
+                    next_frame = cv2.flip(next_frame, 1)
+                elif self.flip_v:
+                    next_frame = cv2.flip(next_frame, 0)
 
             if not ret:
                 if not is_camera:
