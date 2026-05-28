@@ -360,10 +360,17 @@ class MainWindow(QWidget):
 
     def _on_worker_finished(self) -> None:
         """Slot called when the VideoWorker thread finishes (Bug #1/#2 fix).
-        Re-enables buttons and starts any pending source."""
+        Re-enables buttons and starts any pending source. If there is no
+        pending source this is a plain stop — update the UI to reflect that."""
         self._set_controls_enabled(True)
         if self._pending_source is not None:
             self._launch_pending()
+        else:
+            # Plain stop: clear the frozen frame and show a stopped message.
+            # Must call clear() first — setText is ignored when a pixmap is set.
+            self.video_label.clear()
+            self.video_label.setText("Stopped.")
+            self._status.showMessage("Stopped.")
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -415,11 +422,14 @@ class MainWindow(QWidget):
                 self._start_worker(url)
 
     def _stop(self) -> None:
+        """Request the worker to stop. Does NOT disable buttons — the user
+        should be free to open a new source immediately after stopping.
+        Button disabling only applies during a source *switch* (_start_worker).
+        All stopped-state UI updates happen in _on_worker_finished."""
         if self.worker.isRunning():
-            self._set_controls_enabled(False)  # Bug #6: disable until thread exits
-            self.worker.stop()
+            self.stop_btn.setEnabled(False)  # prevent double-stop only
             self._status.showMessage("Stopping…")
-        self.video_label.setText("Stopped.")
+            self.worker.stop()
 
     def _toggle_flip_h(self, checked: bool) -> None:
         self.worker.set_flip_h(checked)
