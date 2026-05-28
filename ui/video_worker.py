@@ -76,13 +76,26 @@ class VideoWorker(QThread):
     def set_rotation(self, angle: int) -> None: self.rotation = angle
 
     def toggle_debug(self) -> None: self.debug_mode = not self.debug_mode
-    def stop(self, timeout_ms: int = 1500) -> None:
+    def stop(self) -> None:
+        """Signal the worker to stop. Does NOT block waiting for thread exit.
+        Callers that need to ensure the thread has fully exited must call
+        self.wait() themselves (e.g. closeEvent). This avoids GUI freezes when
+        the thread is sleeping in a reconnect delay (Bug #1/#2/#3 fix)."""
         self.state.running = False
         self.requestInterruption()
-        if self.isRunning():
-            if not self.wait(timeout_ms):
-                logger.warning("VideoWorker stop timed out; thread still running.")
-                self.worker_warning.emit("Stop taking too long â€” shutting down in background.")
+        if not self.isRunning():
+            logger.debug("VideoWorker.stop() called but thread is not running.")
+
+    def _interruptible_sleep(self, seconds: float) -> bool:
+        """Sleep in 50 ms increments, returning True early if interrupted.
+        Fixes Bug #3: plain time.sleep() was non-interruptible, blocking stop
+        requests for the full backoff duration."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self.isInterruptionRequested() or not self.state.running:
+                return True
+            time.sleep(min(0.05, deadline - time.monotonic()))
+        return False
 
     def _load_models(self, force_cpu: bool = False) -> bool:
         plan = (
@@ -202,7 +215,9 @@ class VideoWorker(QThread):
             delay = min(backoff_base * (2 ** (attempt - 1)), backoff_cap)
             logger.warning("Reconnect attempt %d (%s) — sleeping %.1fs", attempt, reason, delay)
             self.worker_warning.emit(f"⚠ {reason} — reconnecting ({attempt}/{self.cfg.camera_reconnect_attempts})…")
-            time.sleep(delay)
+            # Bug #3 fix: interruptible sleep — exits immediately on stop request.
+            if self._interruptible_sleep(delay):
+                return None  # interrupted; abort reconnect
             new_cap = self._create_capture()
             if new_cap.isOpened():
                 logger.info("Camera reopened on attempt %d", attempt)
@@ -211,8 +226,12 @@ class VideoWorker(QThread):
             return None
 
         ret, frame = cap.read()
-        if not ret:
-            cap.release(); self.worker_error.emit("Cannot read first frame"); return
+        # Bug #7 fix: ret=True with frame=None is a known OpenCV edge case
+        # (corrupted streams, certain RTSP wrappers). Guard before _frame_hash.
+        if not ret or frame is None:
+            cap.release()
+            self.worker_error.emit("Cannot read first frame")
+            return
             
         # Apply orientation transforms to first frame
         if frame is not None:
@@ -233,6 +252,11 @@ class VideoWorker(QThread):
                 frame = cv2.flip(frame, 0)
 
         last_frame_hash = _frame_hash(frame)
+
+        # Bug #12 fix: gate health checks on wall-clock time, not frame count.
+        # Frame-count gating calls psutil up to N times/sec at high FPS.
+        _HEALTH_CHECK_INTERVAL = 1.0  # seconds
+        _last_health_check = time.monotonic()
 
         while self.state.running:
             if self.isInterruptionRequested():
@@ -279,7 +303,11 @@ class VideoWorker(QThread):
                     self.worker_error.emit("Camera reconnect failed"); break
                 last_frame_ts = time.monotonic(); frozen_streak = 0; continue
 
-            if frozen_limit > 0:
+            # Bug #3 fix: _reconnect now uses _interruptible_sleep so a stop
+            # request during a backoff delay exits immediately instead of blocking.
+            # Bug #11 fix: guard _frame_hash against next_frame being None
+            # (ret=True but null buffer is an OpenCV edge case on some streams).
+            if frozen_limit > 0 and next_frame is not None:
                 h = _frame_hash(next_frame)
                 if h == last_frame_hash:
                     frozen_streak += 1
@@ -478,10 +506,13 @@ class VideoWorker(QThread):
                     metrics["total_ms"], len(active_tracks), cur_det_every)
                 metrics["faces"] = metrics["frames"] = 0
 
-            if frame_num % 30 == 0:
+            # Bug #12 fix: time-gated health check (≤1 call/sec regardless of FPS).
+            _now = time.monotonic()
+            if _now - _last_health_check >= _HEALTH_CHECK_INTERVAL:
                 alerts = self.health.update(current_fps, metrics["total_ms"])
                 if alerts:
                     self.health_alerts_ready.emit(alerts)
+                _last_health_check = _now
 
             hud = (f"FPS:{current_fps:.1f}  Scale:{detect_scale:.2f}"
                    f"  Tracks:{len(active_tracks)}  Thr:{sim_thr:.2f}"
@@ -494,7 +525,11 @@ class VideoWorker(QThread):
             hd, wd, ch = rgb_disp.shape
             self.frame_ready.emit(rgb_disp.tobytes(), wd, hd, ch * wd)
 
-            frame = next_frame
+            # Bug #11 fix: only advance frame pointer when next_frame is valid.
+            # Unconditional assignment would set frame=None, crashing frame.shape
+            # on the next iteration.
+            if next_frame is not None:
+                frame = next_frame
 
             if frame_delay > 0:
                 elapsed = time.perf_counter() - t_total
@@ -513,6 +548,8 @@ class VideoWorker(QThread):
         is_camera = isinstance(self._source, int) or (isinstance(self._source, str) and (self._source.lower().startswith("rtsp://") or self._source.lower().startswith("rtsps://")))
         attempts  = self.cfg.camera_reconnect_attempts if is_camera else 1
         for attempt in range(1, attempts + 1):
+            if self.isInterruptionRequested() or not self.state.running:
+                return None  # Bug #3 fix: bail immediately if stopped during retry
             cap = self._create_capture()
             if cap.isOpened():
                 ret, _ = cap.read()
@@ -520,7 +557,9 @@ class VideoWorker(QThread):
                 cap.release()
             if attempt < attempts:
                 self.worker_warning.emit(f"⚠ Cannot open source — retry {attempt}/{attempts}")
-                time.sleep(self.cfg.camera_reconnect_delay)
+                # Bug #3 fix: interruptible sleep instead of blocking time.sleep.
+                if self._interruptible_sleep(self.cfg.camera_reconnect_delay):
+                    return None  # interrupted during retry delay
         self.worker_error.emit(f"Cannot open: {self._source}")
         return None
 

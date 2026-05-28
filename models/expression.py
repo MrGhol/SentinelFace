@@ -40,8 +40,12 @@ class ExpressionRecognizer:
             logger.error("Expression inference failed: %s", exc)
             return "?", 0.0
 
-        idx = int(np.argmax(raw))
-        return self.EMOTIONS[idx], float(raw[idx])
+        # Convert raw logits → probabilities so conf is in [0, 1] and can be
+        # compared against facial_expression_conf_gate (a probability threshold).
+        e = np.exp(raw.astype(np.float64) - raw.max())
+        probs = (e / (e.sum() + 1e-9)).astype(np.float32)
+        idx = int(np.argmax(probs))
+        return self.EMOTIONS[idx], float(probs[idx])
 
     def destroy(self):
         del self.session

@@ -36,10 +36,13 @@ class HealthMonitor:
         mem = psutil.virtual_memory()
         mem_free_mb = mem.available / (1024 * 1024)
         
-        # Write to shared state
-        self.state.current_fps = float(avg_fps)
-        self.state.current_inference_time_ms = float(avg_inf)
-        self.state.current_memory_free_mb = float(mem_free_mb)
+        # Write to shared state — acquire lock so GUI thread reads a consistent
+        # snapshot of all three metrics (Bug #13 fix).
+        with self.state._metrics_lock:
+            self.state.current_fps = float(avg_fps)
+            self.state.current_inference_time_ms = float(avg_inf)
+            self.state.current_memory_free_mb = float(mem_free_mb)
+
         
         alerts = []
         now = time.monotonic()

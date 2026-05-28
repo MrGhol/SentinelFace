@@ -40,7 +40,7 @@ class Track:
                                      dtype=np.float32)
         self.box         = box
         self.features    = deque(maxlen=smoothing_window)
-        self.emb_sum     = np.zeros(512, dtype=np.float32)
+        self.emb_sum: Optional[np.ndarray] = None  # lazily sized from first embedding
         self.track_age   = 0
         self.hits        = 1
         self.quality     = quality
@@ -65,6 +65,8 @@ class Track:
         self.suspect_counter = 0
 
         if emb is not None:
+            if self.emb_sum is None:
+                self.emb_sum = np.zeros_like(emb)
             self.features.append(emb); self.emb_sum += emb
 
     def predict(self, frame_w: int = 99999, frame_h: int = 99999) -> None:
@@ -90,6 +92,8 @@ class Track:
         self.suspect_counter = 0
         
         if emb is not None:
+            if self.emb_sum is None:
+                self.emb_sum = np.zeros_like(emb)
             if len(self.features) == self.features.maxlen:
                 self.emb_sum -= self.features.popleft()
             self.features.append(emb); self.emb_sum += emb; self.emb_changed = True
@@ -181,8 +185,10 @@ class Track:
         self.expression = max(set(self.expression_votes), key=self.expression_votes.count)
 
     def smoothed_embedding(self) -> np.ndarray:
-        if not self.features: return np.zeros(512, dtype=np.float32)
-        if len(self.features) == 1: return self.features[0]
+        if not self.features or self.emb_sum is None:
+            return np.zeros(512, dtype=np.float32)  # fallback; dim matches ArcFace default
+        if len(self.features) == 1:
+            return self.features[0]
         mean = self.emb_sum / len(self.features)
         norm = np.linalg.norm(mean)
         return mean / (norm + 1e-9)
@@ -272,8 +278,9 @@ class FaceTracker:
         if len(self.tracks) != before:
             structure_changed = True
 
-        if not self.tracks:
-            self.next_id = 0
+        # Bug #10 fix: do NOT reset next_id mid-session. IDs must be monotonically
+        # increasing so that VideoWorker._recog_cache never gets stale hits from
+        # recycled IDs. next_id is only reset in FaceTracker.reset().
 
         if structure_changed or self._reid_dirty:
             self._rebuild_reid()

@@ -97,10 +97,12 @@ class FaceDatabase:
             raise ValueError("Embedding must be a 512-dimensional vector.")
         emb = np.ascontiguousarray(emb[np.newaxis], dtype=np.float32)
 
-        # Ensure final path stays within enrollment directory.
+        # Ensure the resolved output path sits directly inside enroll_dir.
+        # The original compound `and` condition was logically broken and could
+        # be bypassed by a traversal name like "../../evil".
         base_dir = self.enroll_dir.resolve()
         out_path = (self.enroll_dir / f"{safe_name}.npy").resolve()
-        if base_dir not in out_path.parents and out_path.parent != base_dir:
+        if out_path.parent != base_dir:
             raise ValueError("Unsafe enrollment name (path traversal detected).")
 
         with self._lock:
