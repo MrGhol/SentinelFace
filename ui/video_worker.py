@@ -58,11 +58,20 @@ class VideoWorker(QThread):
         self.scrfd:    Optional[SCRFD]              = None
         self.arcface:  Optional[ArcFaceONNX]        = None
         self.fairface: Optional[FairFaceAttributes] = None
+        
+        # Transformations
+        self.flip_h     = False
+        self.flip_v     = False
+        self.rotation   = 0
 
     def set_source(self, source) -> None:
         if isinstance(source, str) and source.strip().lstrip("-").isdigit():
             source = int(source)
         self._source = source
+
+    def set_flip_h(self, enabled: bool) -> None: self.flip_h = enabled
+    def set_flip_v(self, enabled: bool) -> None: self.flip_v = enabled
+    def set_rotation(self, angle: int) -> None: self.rotation = angle
 
     def toggle_debug(self) -> None: self.debug_mode = not self.debug_mode
     def stop(self, timeout_ms: int = 1500) -> None:
@@ -153,11 +162,7 @@ class VideoWorker(QThread):
         cap = self._open_capture()
         if cap is None: return
 
-        src_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  or 1280
-        src_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
         out_w   = self.cfg.display_width
-        out_h   = int(out_w * src_h / src_w)
-        d_scale = out_w / src_w
 
         detect_scale  = self.cfg.detect_scale_initial
         scale_locked  = False
@@ -203,6 +208,23 @@ class VideoWorker(QThread):
         ret, frame = cap.read()
         if not ret:
             cap.release(); self.worker_error.emit("Cannot read first frame"); return
+            
+        # Apply orientation transforms to first frame
+        if frame is not None:
+            if self.flip_h and self.flip_v:
+                frame = cv2.flip(frame, -1)
+            elif self.flip_h:
+                frame = cv2.flip(frame, 1)
+            elif self.flip_v:
+                frame = cv2.flip(frame, 0)
+            
+            if self.rotation == 90:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            elif self.rotation == 180:
+                frame = cv2.rotate(frame, cv2.ROTATE_180)
+            elif self.rotation == 270:
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
         last_frame_hash = _frame_hash(frame)
 
         while self.state.running:
@@ -220,6 +242,22 @@ class VideoWorker(QThread):
                     last_frame_ts = time.monotonic(); frozen_streak = 0; continue
 
             ret, next_frame = cap.read()
+            
+            # Apply orientation transforms to incoming frames
+            if next_frame is not None:
+                if self.flip_h and self.flip_v:
+                    next_frame = cv2.flip(next_frame, -1)
+                elif self.flip_h:
+                    next_frame = cv2.flip(next_frame, 1)
+                elif self.flip_v:
+                    next_frame = cv2.flip(next_frame, 0)
+                
+                if self.rotation == 90:
+                    next_frame = cv2.rotate(next_frame, cv2.ROTATE_90_CLOCKWISE)
+                elif self.rotation == 180:
+                    next_frame = cv2.rotate(next_frame, cv2.ROTATE_180)
+                elif self.rotation == 270:
+                    next_frame = cv2.rotate(next_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
             if not ret:
                 if not is_camera:
@@ -254,6 +292,12 @@ class VideoWorker(QThread):
 
             frame_num += 1
             t_total    = time.perf_counter()
+            
+            # Recalculate dimensions dynamically based on current frame shape
+            src_h, src_w = frame.shape[:2]
+            out_h = int(out_w * src_h / src_w)
+            d_scale = out_w / src_w
+            
             frame_disp = cv2.resize(frame, (out_w, out_h))
             rgb_full   = None
 

@@ -163,6 +163,7 @@ class MainWindow(QWidget):
             }
             QPushButton:hover { background-color: #2b3a4a; color: #ffffff; }
             QPushButton:pressed { background-color: #45a29e; color: #0b0c10; }
+            QPushButton:checked { background-color: #45a29e; color: #0b0c10; }
         """
         for b in buttons: 
             b.setStyleSheet(btn_style)
@@ -170,6 +171,29 @@ class MainWindow(QWidget):
             control_layout.addWidget(b)
             
         side_layout.addWidget(control_box)
+
+        # Video Orientation Group
+        trans_box = QGroupBox("Video Orientation")
+        trans_box.setStyleSheet(control_box.styleSheet())
+        trans_layout = QVBoxLayout(trans_box)
+        trans_layout.setSpacing(10)
+
+        self.fliph_btn = QPushButton("↔ Flip Horizontal")
+        self.flipv_btn = QPushButton("↕ Flip Vertical")
+        self.rot_btn   = QPushButton("⟳ Rotate: 0°")
+
+        trans_buttons = (self.fliph_btn, self.flipv_btn, self.rot_btn)
+        for b in trans_buttons:
+            b.setStyleSheet(btn_style)
+            b.setCursor(Qt.PointingHandCursor)
+            
+        self.fliph_btn.setCheckable(True)
+        self.flipv_btn.setCheckable(True)
+        
+        for b in trans_buttons:
+            trans_layout.addWidget(b)
+
+        side_layout.addWidget(trans_box)
 
         # Thresholds Group
         thr_box = QGroupBox("Runtime Thresholds")
@@ -230,6 +254,9 @@ class MainWindow(QWidget):
         self.stop_btn.clicked.connect(self._stop)
         self.enroll_btn.clicked.connect(self._enroll)
         self.debug_btn.clicked.connect(self._toggle_debug)
+        self.fliph_btn.toggled.connect(self._toggle_flip_h)
+        self.flipv_btn.toggled.connect(self._toggle_flip_v)
+        self.rot_btn.clicked.connect(self._cycle_rotation)
         self._sim_spin.valueChanged.connect(lambda v: setattr(self.cfg, "similarity_threshold", v))
         self._fuse_spin.valueChanged.connect(lambda v: setattr(self.cfg, "fused_threshold", v))
         self._conf_spin.valueChanged.connect(lambda v: setattr(self.cfg, "conf_threshold", v))
@@ -328,6 +355,21 @@ class MainWindow(QWidget):
             self.worker.stop()
         self.video_label.setText("Stopped.")
         self._status.showMessage("Stopped.")
+
+    def _toggle_flip_h(self, checked: bool) -> None:
+        self.worker.set_flip_h(checked)
+        self._status.showMessage(f"Horizontal Flip: {'ON' if checked else 'OFF'}")
+
+    def _toggle_flip_v(self, checked: bool) -> None:
+        self.worker.set_flip_v(checked)
+        self._status.showMessage(f"Vertical Flip: {'ON' if checked else 'OFF'}")
+
+    def _cycle_rotation(self) -> None:
+        current = self.worker.rotation
+        next_rot = (current + 90) % 360
+        self.worker.set_rotation(next_rot)
+        self.rot_btn.setText(f"⟳ Rotate: {next_rot}°")
+        self._status.showMessage(f"Rotation: {next_rot}°")
 
     def _toggle_debug(self) -> None:
         self.worker.toggle_debug()
