@@ -36,7 +36,6 @@ class Config:
     track_max_area_frac:   float = 0.65  # kill if box > 65% of frame area
     track_max_aspect_ratio: float = 8.0  # kill if w/h or h/w exceeds this
     track_max_area_jump:   float = 2.5   # kill if area grows > 2.5x in one predict
-    track_max_vel_jump:    float = 3.0   # kill if velocity jumps > 3x previous
     track_grace_frames:    int   = 2     # frames before killing on violation
 
     # ── Quality gates ─────────────────────────────────────────────────────────
@@ -148,7 +147,6 @@ class Config:
         _range("track_max_area_frac",    self.track_max_area_frac,    0.0, 1.0)
         _range("track_max_aspect_ratio", self.track_max_aspect_ratio, 1.0, None)
         _range("track_max_area_jump",    self.track_max_area_jump,    1.0, None)
-        _range("track_max_vel_jump",     self.track_max_vel_jump,     1.0, None)
         _positive_int("track_grace_frames", self.track_grace_frames, allow_zero=True)
 
         # Quality gates

@@ -145,7 +145,6 @@ Adapters validate input/output shapes and isolate inference logic from the rest 
 The tracking system includes:
 
 - IoU-based association
-- Kalman motion prediction
 - Cosine similarity Re-ID
 - Grace-based track eviction (temporal smoothing)
 - Defensive bounding box sanity checks

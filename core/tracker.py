@@ -3,7 +3,6 @@ import threading
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
-import cv2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
@@ -24,20 +23,6 @@ class Track:
     def __init__(self, box: Tuple, emb: Optional[np.ndarray],
                  quality: float, det_conf: float, smoothing_window: int,
                  expr_smooth_window: int = 10):
-        self.kf = cv2.KalmanFilter(8, 4)
-        self.kf.measurementMatrix = np.eye(4, 8, dtype=np.float32)
-        T = np.eye(8, dtype=np.float32)
-        for i in range(4): T[i, i+4] = 1.0
-        self.kf.transitionMatrix    = T
-        self.kf.processNoiseCov     = np.diag(
-            np.array([1., 1., 5., 5., 0.1, 0.1, 0.01, 0.01], dtype=np.float32))
-        self.kf.measurementNoiseCov = np.diag(
-            np.array([1., 1., 10., 10.], dtype=np.float32))
-        self.kf.errorCovPost        = np.eye(8, dtype=np.float32) * 10.0
-
-        x, y, w, h = box
-        self.kf.statePost = np.array([x+w/2., y+h/2., w, h, 0., 0., 0., 0.],
-                                     dtype=np.float32)
         self.box         = box
         self.features    = deque(maxlen=smoothing_window)
         self.emb_sum: Optional[np.ndarray] = None  # lazily sized from first embedding
@@ -61,7 +46,6 @@ class Track:
         self.last_expression_crop: Optional[np.ndarray] = None
 
         self._prev_area: Optional[float] = None
-        self._prev_vel: Tuple[float, float] = (0.0, 0.0) 
         self.suspect_counter = 0
 
         if emb is not None:
@@ -70,21 +54,17 @@ class Track:
             self.features.append(emb); self.emb_sum += emb
 
     def predict(self, frame_w: int = 99999, frame_h: int = 99999) -> None:
-        pred = self.kf.predict()
-        cx, cy, w, h, vx, vy = pred.flatten()[:6]
+        x, y, w, h = self.box
         fw, fh = float(frame_w), float(frame_h)
         w = max(1.0, min(float(w), fw))
         h = max(1.0, min(float(h), fh))
-        x = max(0.0, min(cx - w / 2.0, fw - w))
-        y = max(0.0, min(cy - h / 2.0, fh - h))
+        x = max(0.0, min(x, fw - w))
+        y = max(0.0, min(y, fh - h))
         self.box = (x, y, w, h)
-        self._prev_vel = (vx, vy)
 
     def update(self, box: Tuple, emb: Optional[np.ndarray], quality: float,
                det_conf: float, aligned: Optional[np.ndarray],
                ff_crop: Optional[np.ndarray], expr_crop: Optional[np.ndarray] = None) -> None:
-        x, y, w, h = box
-        self.kf.correct(np.array([x+w/2., y+h/2., w, h], dtype=np.float32))
         self.box = box; self.quality = quality; self.det_conf = det_conf
         self.track_age = 0; self.hits += 1; self.emb_changed = False
         
@@ -106,12 +86,7 @@ class Track:
                 self.last_fairface_crop = ff_crop
 
     def set_fps_hint(self, fps: float) -> None:
-        fps   = max(1.0, fps)
-        scale = 30.0 / fps   
-        self.kf.processNoiseCov = np.diag(
-            np.array([1.*scale, 1.*scale, 5.*scale, 5.*scale,
-                      0.1*scale, 0.1*scale, 0.01*scale, 0.01*scale],
-                     dtype=np.float32))
+        pass
 
     def sanity_ok(self, frame_w: int, frame_h: int, cfg: Config) -> bool:
         """
@@ -136,13 +111,6 @@ class Track:
         prev_area = self._prev_area
         self._prev_area = float(box_area)
         if prev_area is not None and prev_area > 0 and box_area / prev_area > cfg.track_max_area_jump:
-            is_suspect = True
-
-        prev_vx, prev_vy = self._prev_vel
-        curr_vx, curr_vy = self.kf.statePost[4:6]
-        prev_mag = np.hypot(prev_vx, prev_vy)
-        curr_mag = np.hypot(curr_vx, curr_vy)
-        if prev_mag > 0 and curr_mag / prev_mag > cfg.track_max_vel_jump:
             is_suspect = True
 
         if is_suspect:
