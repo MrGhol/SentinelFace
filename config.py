@@ -14,6 +14,7 @@ class Config:
     arcface_model: str = "models/buffalo_l/w600k_r50.onnx"
     gender_model:  str = "models/gender.onnx"
     age_model:     str = "models/age.onnx"
+    facial_expression_model: str = "models/facial_expression_model.onnx"
     enroll_dir:    str = "enrolled_faces"
 
     # ── Recognition ───────────────────────────────────────────────────────────
@@ -63,6 +64,12 @@ class Config:
     fairface_max_gate_fails: int   = 10   
     fairface_every_n:        int   = 3
     fairface_male_class_indices: tuple = ()
+
+    # ── Facial Expression ─────────────────────────────────────────────────────
+    facial_expression_every_n: int   = 3
+    facial_expression_conf_gate: float = 0.25
+    facial_expression_bbox_pad: float = 0.15
+    facial_expression_smooth_window: int = 10
 
     # ── SCRFD detector ────────────────────────────────────────────────────────
     scrfd_input_size: Tuple[int, int] = (640, 640)
@@ -170,6 +177,12 @@ class Config:
         _positive_int("fairface_max_crop_age",   self.fairface_max_crop_age, allow_zero=True)
         _positive_int("fairface_max_gate_fails", self.fairface_max_gate_fails, allow_zero=True)
         _positive_int("fairface_every_n",        self.fairface_every_n)
+
+        # Facial Expression
+        _positive_int("facial_expression_every_n",   self.facial_expression_every_n)
+        _range("facial_expression_conf_gate", self.facial_expression_conf_gate, 0.0, 1.0)
+        _range("facial_expression_bbox_pad",  self.facial_expression_bbox_pad,  0.0, None)
+        _positive_int("facial_expression_smooth_window", self.facial_expression_smooth_window)
 
         # SCRFD detector
         if (not isinstance(self.scrfd_input_size, tuple)

@@ -22,7 +22,8 @@ def _iou_xywh(a: Tuple, b: Tuple) -> float:
 
 class Track:
     def __init__(self, box: Tuple, emb: Optional[np.ndarray],
-                 quality: float, det_conf: float, smoothing_window: int):
+                 quality: float, det_conf: float, smoothing_window: int,
+                 expr_smooth_window: int = 10):
         self.kf = cv2.KalmanFilter(8, 4)
         self.kf.measurementMatrix = np.eye(4, 8, dtype=np.float32)
         T = np.eye(8, dtype=np.float32)
@@ -55,6 +56,10 @@ class Track:
         self.last_aligned:      Optional[np.ndarray] = None
         self.last_fairface_crop: Optional[np.ndarray] = None
 
+        self.expression       = "?"
+        self.expression_votes = deque(maxlen=expr_smooth_window)
+        self.last_expression_crop: Optional[np.ndarray] = None
+
         self._prev_area: Optional[float] = None
         self._prev_vel: Tuple[float, float] = (0.0, 0.0) 
         self.suspect_counter = 0
@@ -75,7 +80,7 @@ class Track:
 
     def update(self, box: Tuple, emb: Optional[np.ndarray], quality: float,
                det_conf: float, aligned: Optional[np.ndarray],
-               ff_crop: Optional[np.ndarray]) -> None:
+               ff_crop: Optional[np.ndarray], expr_crop: Optional[np.ndarray] = None) -> None:
         x, y, w, h = box
         self.kf.correct(np.array([x+w/2., y+h/2., w, h], dtype=np.float32))
         self.box = box; self.quality = quality; self.det_conf = det_conf
@@ -88,9 +93,13 @@ class Track:
             if len(self.features) == self.features.maxlen:
                 self.emb_sum -= self.features.popleft()
             self.features.append(emb); self.emb_sum += emb; self.emb_changed = True
+        if aligned is not None:
+            self.last_aligned = aligned
+        if expr_crop is not None:
+            self.last_expression_crop = expr_crop
         if not self.genderage_settled:
-            if aligned  is not None: self.last_aligned       = aligned
-            if ff_crop  is not None: self.last_fairface_crop = ff_crop
+            if ff_crop is not None:
+                self.last_fairface_crop = ff_crop
 
     def set_fps_hint(self, fps: float) -> None:
         fps   = max(1.0, fps)
@@ -157,13 +166,19 @@ class Track:
         self.person_age = max(set(self.age_samples),  key=self.age_samples.count)
         if len(self.gender_votes) >= settle_votes:
             self.genderage_settled  = True
-            self.last_aligned       = None
             self.last_fairface_crop = None
 
     def tick_age_cleanup(self, max_crop_age: int) -> None:
-        if not self.genderage_settled and self.track_age > max_crop_age:
+        if self.track_age > max_crop_age:
             self.last_fairface_crop = None
             self.last_aligned       = None
+            self.last_expression_crop = None
+
+    def apply_expression(self, expression: str) -> None:
+        if expression == "?":
+            return
+        self.expression_votes.append(expression)
+        self.expression = max(set(self.expression_votes), key=self.expression_votes.count)
 
     def smoothed_embedding(self) -> np.ndarray:
         if not self.features: return np.zeros(512, dtype=np.float32)
@@ -237,8 +252,10 @@ class FaceTracker:
             matched = set()
             for i, j in zip(row_ind, col_ind):
                 if iou_mat[i, j] >= self.cfg.tracker_iou:
-                    box, emb, q, dc, aligned, ff_crop = detections[i]
-                    self.tracks[tids[j]].update(box, emb, q, dc, aligned, ff_crop)
+                    det_data = detections[i]
+                    box, emb, q, dc, aligned, ff_crop = det_data[:6]
+                    expr_crop = det_data[6] if len(det_data) > 6 else None
+                    self.tracks[tids[j]].update(box, emb, q, dc, aligned, ff_crop, expr_crop)
                     if emb is not None:
                         self._reid_dirty = True
                     matched.add(i)
@@ -269,7 +286,8 @@ class FaceTracker:
         tr = self.tracks.get(tid); return tr.emb_changed if tr else False
 
     def _spawn(self, det: Tuple) -> None:
-        box, emb, qual, dconf, aligned, ff_crop = det
+        box, emb, qual, dconf, aligned, ff_crop = det[:6]
+        expr_crop = det[6] if len(det) > 6 else None
 
         if emb is not None:
             if self._reid_dirty:
@@ -282,7 +300,7 @@ class FaceTracker:
                     best_sim = float(sims[best_idx])
                     if best_sim >= self.cfg.reid_threshold:
                         best_tid = self._reid_tids[best_idx]
-                        self.tracks[best_tid].update(box, emb, qual, dconf, aligned, ff_crop)
+                        self.tracks[best_tid].update(box, emb, qual, dconf, aligned, ff_crop, expr_crop)
                         self._reid_dirty = True
                         logger.debug("Re-ID: det → track %d (sim=%.3f)", best_tid, best_sim)
                         return
@@ -297,9 +315,10 @@ class FaceTracker:
 
         embed = emb if qual >= self.cfg.min_update_quality else None
         tid   = self.next_id; self.next_id += 1
-        tr    = Track(box, embed, qual, dconf, self.cfg.smoothing_window)
+        tr    = Track(box, embed, qual, dconf, self.cfg.smoothing_window, self.cfg.facial_expression_smooth_window)
         tr.last_aligned       = aligned
         tr.last_fairface_crop = ff_crop
+        tr.last_expression_crop = expr_crop
         tr.set_fps_hint(self._current_fps)
         self.tracks[tid]  = tr
         self._reid_dirty  = True

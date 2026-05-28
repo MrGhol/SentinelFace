@@ -14,6 +14,7 @@ from core.database import FaceDatabase
 from core.tracker import FaceTracker
 from models.arcface import ArcFaceONNX
 from models.fairface import FairFaceAttributes, fairface_crop
+from models.expression import ExpressionRecognizer
 from models.scrfd import SCRFD
 from state import SystemState
 from utils.health import HealthMonitor
@@ -58,6 +59,7 @@ class VideoWorker(QThread):
         self.scrfd:    Optional[SCRFD]              = None
         self.arcface:  Optional[ArcFaceONNX]        = None
         self.fairface: Optional[FairFaceAttributes] = None
+        self.expression_recognizer: Optional[ExpressionRecognizer] = None
         
         # Transformations
         self.flip_h     = getattr(self.cfg, "flip_h", False)
@@ -95,6 +97,7 @@ class VideoWorker(QThread):
                 self.scrfd    = SCRFD(self.cfg, providers, cuda_opts)
                 self.arcface  = ArcFaceONNX(self.cfg, providers, cuda_opts)
                 self.fairface = FairFaceAttributes(self.cfg, providers, cuda_opts)
+                self.expression_recognizer = ExpressionRecognizer(self.cfg, providers, cuda_opts)
                 self._warmup_models()
                 if attempt > 0 or force_cpu:
                     self.worker_warning.emit("⚠ GPU unavailable — running on CPU")
@@ -118,6 +121,8 @@ class VideoWorker(QThread):
             dummy_ff = np.zeros((1, 3, 224, 224), np.float32)
             self.fairface.gender_sess.run(None, {self.fairface.gender_input: dummy_ff})
             self.fairface.age_sess.run(None,    {self.fairface.age_input:    dummy_ff})
+            dummy_expr = np.zeros((1, 48, 48, 1), np.float32)
+            self.expression_recognizer.session.run(None, {self.expression_recognizer.inp_name: dummy_expr})
             logger.info("ONNX warm-up complete.")
         except Exception as exc:
             logger.warning("ONNX warm-up failed (non-fatal): %s", exc)
@@ -339,10 +344,11 @@ class VideoWorker(QThread):
                         except Exception as exc:
                             self._handle_inference_error(exc, "ArcFace embed")
                     ff_crop = fairface_crop(rgb_full, bbox, self.cfg.fairface_bbox_pad)
+                    expr_crop = fairface_crop(rgb_full, bbox, self.cfg.facial_expression_bbox_pad)
                     x1d = int(bbox[0] * d_scale); y1d = int(bbox[1] * d_scale)
                     x2d = int(bbox[2] * d_scale); y2d = int(bbox[3] * d_scale)
                     detections.append(((x1d, y1d, x2d-x1d, y2d-y1d),
-                                       emb, quality, det_conf, aligned, ff_crop))
+                                       emb, quality, det_conf, aligned, ff_crop, expr_crop))
                     if emb is not None:
                         self.last_good_det = (bbox, kps, aligned, emb)
                         self.last_good_det_updated.emit(self.last_good_det)
@@ -368,6 +374,21 @@ class VideoWorker(QThread):
                             self._handle_inference_error(exc, "FairFace estimate")
                             gender, age_grp = "?", "?"
                         tr.apply_genderage(gender, age_grp, sv, mgf)
+
+            do_expression = (self.cfg.facial_expression_every_n <= 1
+                             or frame_num % self.cfg.facial_expression_every_n == 0)
+            if do_expression:
+                for tid, _b, _e, _q, _dc in active_tracks:
+                    tr = self.tracker.tracks.get(tid)
+                    if tr and tr.last_expression_crop is not None:
+                        try:
+                            emotion, conf = self.expression_recognizer.predict(tr.last_expression_crop)
+                            if conf >= self.cfg.facial_expression_conf_gate:
+                                tr.apply_expression(emotion)
+                        except Exception as exc:
+                            self._handle_inference_error(exc, "Expression estimate")
+                        finally:
+                            tr.last_expression_crop = None
 
             active_ids = set()
             sim_thr    = self.cfg.similarity_threshold
@@ -397,6 +418,7 @@ class VideoWorker(QThread):
                 tr      = self.tracker.tracks.get(tid)
                 gender  = tr.gender     if tr else "?"
                 age_str = tr.person_age if tr else "?"
+                expression = tr.expression if tr else "?"
 
                 x  = max(0, int(box[0])); y  = max(0, int(box[1]))
                 wb = min(int(box[2]), out_w - x); hb = min(int(box[3]), out_h - y)
@@ -405,7 +427,7 @@ class VideoWorker(QThread):
                 color = (0, 200, 0) if name != "UNKNOWN" else (0, 0, 220)
                 cv2.rectangle(frame_disp, (x, y), (x+wb, y+hb), color, 2)
 
-                label = f"{name} {sim:.2f}  {gender}  {age_str}"
+                label = f"{name} {sim:.2f}  {gender}  {age_str}  {expression}"
                 if self.debug_mode:
                     settled = tr.genderage_settled if tr else False
                     label  += (f"  ID:{tid} Q:{tqual:.2f} GA:{'✓' if settled else '…'}")
@@ -503,9 +525,9 @@ class VideoWorker(QThread):
         return None
 
     def release_models(self) -> None:
-        for m in (self.scrfd, self.arcface, self.fairface):
+        for m in (self.scrfd, self.arcface, self.fairface, self.expression_recognizer):
             if m is not None:
                 try: m.destroy()
                 except Exception: pass
-        self.scrfd = self.arcface = self.fairface = None
+        self.scrfd = self.arcface = self.fairface = self.expression_recognizer = None
         gc.collect(); logger.info("ONNX sessions released.")

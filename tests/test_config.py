@@ -11,6 +11,9 @@ class TestConfig(unittest.TestCase):
         cfg = Config()
         self.assertEqual(cfg.health_memory_min_free_mb, 500.0)
         self.assertEqual(cfg.track_grace_frames, 2)
+        self.assertEqual(cfg.facial_expression_every_n, 3)
+        self.assertEqual(cfg.facial_expression_conf_gate, 0.25)
+        self.assertEqual(cfg.facial_expression_smooth_window, 10)
         
         # 2. JSON Override
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
@@ -48,6 +51,18 @@ class TestConfig(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             cli = {"rotation": 45}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"facial_expression_every_n": 0}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"facial_expression_conf_gate": 1.1}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"facial_expression_smooth_window": 0}
             load_config("nonexistent.json", cli)
 
 if __name__ == "__main__":
