@@ -190,6 +190,10 @@ class MainWindow(QWidget):
         self.fliph_btn.setCheckable(True)
         self.flipv_btn.setCheckable(True)
         
+        self.fliph_btn.setChecked(getattr(self.cfg, "flip_h", False))
+        self.flipv_btn.setChecked(getattr(self.cfg, "flip_v", False))
+        self.rot_btn.setText(f"⟳ Rotate: {getattr(self.cfg, 'rotation', 0)}°")
+        
         for b in trans_buttons:
             trans_layout.addWidget(b)
 

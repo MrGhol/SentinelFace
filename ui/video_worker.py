@@ -60,9 +60,9 @@ class VideoWorker(QThread):
         self.fairface: Optional[FairFaceAttributes] = None
         
         # Transformations
-        self.flip_h     = False
-        self.flip_v     = False
-        self.rotation   = 0
+        self.flip_h     = getattr(self.cfg, "flip_h", False)
+        self.flip_v     = getattr(self.cfg, "flip_v", False)
+        self.rotation   = getattr(self.cfg, "rotation", 0)
 
     def set_source(self, source) -> None:
         if isinstance(source, str) and source.strip().lstrip("-").isdigit():

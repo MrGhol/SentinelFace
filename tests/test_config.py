@@ -46,5 +46,9 @@ class TestConfig(unittest.TestCase):
             cli = {"rtsp_transport": "invalid"}
             load_config("nonexistent.json", cli)
 
+        with self.assertRaises(ValueError):
+            cli = {"rotation": 45}
+            load_config("nonexistent.json", cli)
+
 if __name__ == "__main__":
     unittest.main()

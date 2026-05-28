@@ -97,6 +97,11 @@ class Config:
     # ── RTSP Settings ─────────────────────────────────────────────────────────
     rtsp_transport:    str  = "tcp"
 
+    # ── Video Transformations ──────────────────────────────────────────────────
+    flip_h:            bool = False
+    flip_v:            bool = False
+    rotation:          int  = 0
+
     # ── Health monitoring ─────────────────────────────────────────────────────
     health_fps_low_threshold:    float = 10.0
     health_inf_time_high:        float = 100.0
@@ -204,6 +209,10 @@ class Config:
         # RTSP settings
         if self.rtsp_transport not in ("tcp", "udp"):
             raise ValueError("rtsp_transport must be either 'tcp' or 'udp'")
+
+        # Video Transformations
+        if self.rotation not in (0, 90, 180, 270):
+            raise ValueError("rotation must be 0, 90, 180, or 270")
 
         # Health monitoring
         _range("health_fps_low_threshold",  self.health_fps_low_threshold,  0.0, None)
