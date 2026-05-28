@@ -94,6 +94,9 @@ class Config:
     display_width:     int  = 960
     use_gpu:           bool = True
 
+    # ── RTSP Settings ─────────────────────────────────────────────────────────
+    rtsp_transport:    str  = "tcp"
+
     # ── Health monitoring ─────────────────────────────────────────────────────
     health_fps_low_threshold:    float = 10.0
     health_inf_time_high:        float = 100.0
@@ -197,6 +200,10 @@ class Config:
         _positive_int("ort_intra_threads", self.ort_intra_threads)
         _positive_int("ort_inter_threads", self.ort_inter_threads)
         _positive_int("display_width",     self.display_width)
+
+        # RTSP settings
+        if self.rtsp_transport not in ("tcp", "udp"):
+            raise ValueError("rtsp_transport must be either 'tcp' or 'udp'")
 
         # Health monitoring
         _range("health_fps_low_threshold",  self.health_fps_low_threshold,  0.0, None)

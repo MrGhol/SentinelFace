@@ -149,7 +149,7 @@ class VideoWorker(QThread):
             self.state.running = False
 
     def _main_loop(self) -> None:
-        is_camera = isinstance(self._source, int)
+        is_camera = isinstance(self._source, int) or (isinstance(self._source, str) and (self._source.lower().startswith("rtsp://") or self._source.lower().startswith("rtsps://")))
         cap = self._open_capture()
         if cap is None: return
 
@@ -193,7 +193,7 @@ class VideoWorker(QThread):
             logger.warning("Reconnect attempt %d (%s) — sleeping %.1fs", attempt, reason, delay)
             self.worker_warning.emit(f"⚠ {reason} — reconnecting ({attempt}/{self.cfg.camera_reconnect_attempts})…")
             time.sleep(delay)
-            new_cap = cv2.VideoCapture(self._source)
+            new_cap = self._create_capture()
             if new_cap.isOpened():
                 logger.info("Camera reopened on attempt %d", attempt)
                 return new_cap
@@ -432,11 +432,18 @@ class VideoWorker(QThread):
 
         cap.release()
 
+    def _create_capture(self) -> cv2.VideoCapture:
+        if isinstance(self._source, str) and (self._source.lower().startswith("rtsp://") or self._source.lower().startswith("rtsps://")):
+            import os
+            transport = getattr(self.cfg, "rtsp_transport", "tcp")
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = f"rtsp_transport;{transport}"
+        return cv2.VideoCapture(self._source)
+
     def _open_capture(self) -> Optional[cv2.VideoCapture]:
-        is_camera = isinstance(self._source, int)
+        is_camera = isinstance(self._source, int) or (isinstance(self._source, str) and (self._source.lower().startswith("rtsp://") or self._source.lower().startswith("rtsps://")))
         attempts  = self.cfg.camera_reconnect_attempts if is_camera else 1
         for attempt in range(1, attempts + 1):
-            cap = cv2.VideoCapture(self._source)
+            cap = self._create_capture()
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret: return cap

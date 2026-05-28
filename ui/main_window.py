@@ -7,7 +7,8 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout,
                                QInputDialog, QLabel, QMessageBox, QPushButton,
-                               QStatusBar, QVBoxLayout, QWidget)
+                               QStatusBar, QVBoxLayout, QWidget, QDialog,
+                               QDialogButtonBox, QLineEdit)
 
 from config import Config
 from state import SystemState
@@ -15,6 +16,92 @@ from ui.video_worker import VideoWorker
 from core.database import FaceDatabase
 
 logger = logging.getLogger("FaceSystem.UI")
+
+class RTSPLoginDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("RTSP Connection Credentials")
+        self.setFixedWidth(420)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        # Style sheet matching the premium dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0b0c10;
+                color: #c5c6c7;
+            }
+            QLabel {
+                color: #66fcf1;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QLineEdit {
+                background-color: #1f2833;
+                color: #ffffff;
+                border: 1px solid #45a29e;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #66fcf1;
+            }
+            QDialogButtonBox {
+                margin-top: 10px;
+            }
+            QPushButton {
+                background-color: #1f2833;
+                color: #c5c6c7;
+                border: 1px solid #45a29e;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2b3a4a;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #45a29e;
+                color: #0b0c10;
+            }
+        """)
+        
+        form_layout = QFormLayout()
+        form_layout.setSpacing(10)
+        
+        self.url_input = QLineEdit("rtsp://")
+        self.user_input = QLineEdit()
+        self.user_input.setPlaceholderText("Leave empty if no auth")
+        
+        self.pass_input = QLineEdit()
+        self.pass_input.setEchoMode(QLineEdit.Password)
+        self.pass_input.setPlaceholderText("Leave empty if no auth")
+        
+        form_layout.addRow("RTSP URL:", self.url_input)
+        form_layout.addRow("Username:", self.user_input)
+        form_layout.addRow("Password:", self.pass_input)
+        
+        layout.addLayout(form_layout)
+        
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            self
+        )
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        
+        layout.addWidget(self.buttons)
+        
+    def get_credentials(self) -> Tuple[str, str, str]:
+        return (
+            self.url_input.text().strip(),
+            self.user_input.text().strip(),
+            self.pass_input.text().strip()
+        )
 
 class MainWindow(QWidget):
     def __init__(self, cfg: Config, state: SystemState, db: FaceDatabase, worker: VideoWorker):
@@ -61,11 +148,12 @@ class MainWindow(QWidget):
 
         self.open_btn   = QPushButton("📂 Open Video")
         self.cam_btn    = QPushButton("🎥 Open Camera")
+        self.rtsp_btn   = QPushButton("🌐 Open RTSP")
         self.stop_btn   = QPushButton("⏹ Stop")
         self.enroll_btn = QPushButton("➕ Enroll Face")
         self.debug_btn  = QPushButton("🐛 Debug: OFF")
         
-        buttons = (self.open_btn, self.cam_btn, self.stop_btn,
+        buttons = (self.open_btn, self.cam_btn, self.rtsp_btn, self.stop_btn,
                    self.enroll_btn, self.debug_btn)
                    
         btn_style = """
@@ -138,6 +226,7 @@ class MainWindow(QWidget):
         # UI Events
         self.open_btn.clicked.connect(self._open_video)
         self.cam_btn.clicked.connect(self._open_camera)
+        self.rtsp_btn.clicked.connect(self._open_rtsp)
         self.stop_btn.clicked.connect(self._stop)
         self.enroll_btn.clicked.connect(self._enroll)
         self.debug_btn.clicked.connect(self._toggle_debug)
@@ -209,6 +298,30 @@ class MainWindow(QWidget):
     def _open_camera(self) -> None:
         idx, ok = QInputDialog.getInt(self, "Camera", "Camera index:", 0, 0, 9)
         if ok: self._start_worker(idx)
+
+    def _open_rtsp(self) -> None:
+        dialog = RTSPLoginDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            url, user, password = dialog.get_credentials()
+            if url:
+                import urllib.parse
+                # Format URL with credentials
+                prefix = "rtsp://"
+                if url.lower().startswith("rtsps://"):
+                    prefix = "rtsps://"
+                elif not url.lower().startswith("rtsp://"):
+                    url = prefix + url
+                    
+                rest = url[len(prefix):]
+                if "@" not in rest and (user or password):
+                    user_q = urllib.parse.quote(user)
+                    pass_q = urllib.parse.quote(password)
+                    if user_q and pass_q:
+                        url = f"{prefix}{user_q}:{pass_q}@{rest}"
+                    elif user_q:
+                        url = f"{prefix}{user_q}@{rest}"
+                
+                self._start_worker(url)
 
     def _stop(self) -> None:
         if self.state.running: 

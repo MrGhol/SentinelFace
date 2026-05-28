@@ -42,5 +42,9 @@ class TestConfig(unittest.TestCase):
             cli = {"similarity_threshold": 1.5}
             load_config("nonexistent.json", cli)
 
+        with self.assertRaises(ValueError):
+            cli = {"rtsp_transport": "invalid"}
+            load_config("nonexistent.json", cli)
+
 if __name__ == "__main__":
     unittest.main()
