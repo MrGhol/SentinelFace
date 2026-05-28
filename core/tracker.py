@@ -22,7 +22,7 @@ def _iou_xywh(a: Tuple, b: Tuple) -> float:
 class Track:
     def __init__(self, box: Tuple, emb: Optional[np.ndarray],
                  quality: float, det_conf: float, smoothing_window: int,
-                 expr_smooth_window: int = 10):
+                 expr_smooth_window: int = 10, race_smooth_window: int = 10):
         self.box         = box
         self.features    = deque(maxlen=smoothing_window)
         self.emb_sum: Optional[np.ndarray] = None  # lazily sized from first embedding
@@ -40,6 +40,11 @@ class Track:
         self.gate_fail_count   = 0
         self.last_aligned:      Optional[np.ndarray] = None
         self.last_fairface_crop: Optional[np.ndarray] = None
+
+        self.race                 = "?"
+        self.race_votes           = deque(maxlen=race_smooth_window)
+        self.race_settled         = False
+        self.race_gate_fail_count = 0
 
         self.expression       = "?"
         self.expression_votes = deque(maxlen=expr_smooth_window)
@@ -130,7 +135,8 @@ class Track:
         if gender == "?" or age == "?":
             self.gate_fail_count += 1
             if self.gate_fail_count >= max_gate_fails:
-                self.last_fairface_crop = None 
+                if self.race_settled:
+                    self.last_fairface_crop = None 
             return
         self.gate_fail_count = 0
         self.gender_votes.append(gender); self.age_samples.append(age)
@@ -138,7 +144,24 @@ class Track:
         self.person_age = max(set(self.age_samples),  key=self.age_samples.count)
         if len(self.gender_votes) >= settle_votes:
             self.genderage_settled  = True
-            self.last_fairface_crop = None
+            if self.race_settled:
+                self.last_fairface_crop = None
+
+    def apply_race(self, race: str, settle_votes: int, max_gate_fails: int) -> None:
+        if self.race_settled: return
+        if race == "?":
+            self.race_gate_fail_count += 1
+            if self.race_gate_fail_count >= max_gate_fails:
+                if self.genderage_settled:
+                    self.last_fairface_crop = None
+            return
+        self.race_gate_fail_count = 0
+        self.race_votes.append(race)
+        self.race = max(set(self.race_votes), key=self.race_votes.count)
+        if len(self.race_votes) >= settle_votes:
+            self.race_settled = True
+            if self.genderage_settled:
+                self.last_fairface_crop = None
 
     def tick_age_cleanup(self, max_crop_age: int) -> None:
         if self.track_age > max_crop_age:
@@ -290,7 +313,7 @@ class FaceTracker:
 
         embed = emb if qual >= self.cfg.min_update_quality else None
         tid   = self.next_id; self.next_id += 1
-        tr    = Track(box, embed, qual, dconf, self.cfg.smoothing_window, self.cfg.facial_expression_smooth_window)
+        tr    = Track(box, embed, qual, dconf, self.cfg.smoothing_window, self.cfg.facial_expression_smooth_window, self.cfg.race_smooth_window)
         tr.last_aligned       = aligned
         tr.last_fairface_crop = ff_crop
         tr.last_expression_crop = expr_crop

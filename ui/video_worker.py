@@ -15,6 +15,7 @@ from core.tracker import FaceTracker
 from models.arcface import ArcFaceONNX
 from models.fairface import FairFaceAttributes, fairface_crop
 from models.expression import ExpressionRecognizer
+from models.race import RaceClassifier
 from models.scrfd import SCRFD
 from state import SystemState
 from utils.health import HealthMonitor
@@ -60,6 +61,7 @@ class VideoWorker(QThread):
         self.arcface:  Optional[ArcFaceONNX]        = None
         self.fairface: Optional[FairFaceAttributes] = None
         self.expression_recognizer: Optional[ExpressionRecognizer] = None
+        self.race_classifier: Optional[RaceClassifier] = None
         
         # Transformations
         self.flip_h     = getattr(self.cfg, "flip_h", False)
@@ -111,6 +113,7 @@ class VideoWorker(QThread):
                 self.arcface  = ArcFaceONNX(self.cfg, providers, cuda_opts)
                 self.fairface = FairFaceAttributes(self.cfg, providers, cuda_opts)
                 self.expression_recognizer = ExpressionRecognizer(self.cfg, providers, cuda_opts)
+                self.race_classifier = RaceClassifier(self.cfg, providers, cuda_opts)
                 self._warmup_models()
                 if attempt > 0 or force_cpu:
                     self.worker_warning.emit("⚠ GPU unavailable — running on CPU")
@@ -136,6 +139,8 @@ class VideoWorker(QThread):
             self.fairface.age_sess.run(None,    {self.fairface.age_input:    dummy_ff})
             dummy_expr = np.zeros((1, 48, 48, 1), np.float32)
             self.expression_recognizer.session.run(None, {self.expression_recognizer.inp_name: dummy_expr})
+            dummy_race = np.zeros((1, 3, 224, 224), np.float32)
+            self.race_classifier.session.run(None, {self.race_classifier.inp_name: dummy_race})
             logger.info("ONNX warm-up complete.")
         except Exception as exc:
             logger.warning("ONNX warm-up failed (non-fatal): %s", exc)
@@ -418,6 +423,23 @@ class VideoWorker(QThread):
                         finally:
                             tr.last_expression_crop = None
 
+            do_race = (self.cfg.race_every_n <= 1
+                       or frame_num % self.cfg.race_every_n == 0)
+            if do_race:
+                r_sv  = self.cfg.race_settle_votes
+                r_mgf = self.cfg.fairface_max_gate_fails
+                for tid, _b, _e, _q, _dc in active_tracks:
+                    tr = self.tracker.tracks.get(tid)
+                    if tr and not tr.race_settled and tr.last_fairface_crop is not None:
+                        try:
+                            race, conf = self.race_classifier.predict(tr.last_fairface_crop)
+                            if conf >= self.cfg.race_conf_gate:
+                                tr.apply_race(race, r_sv, r_mgf)
+                            else:
+                                tr.apply_race("?", r_sv, r_mgf)
+                        except Exception as exc:
+                            self._handle_inference_error(exc, "Race estimate")
+
             active_ids = set()
             sim_thr    = self.cfg.similarity_threshold
             fused_thr  = self.cfg.fused_threshold
@@ -447,6 +469,7 @@ class VideoWorker(QThread):
                 gender  = tr.gender     if tr else "?"
                 age_str = tr.person_age if tr else "?"
                 expression = tr.expression if tr else "?"
+                race    = tr.race       if tr else "?"
 
                 x  = max(0, int(box[0])); y  = max(0, int(box[1]))
                 wb = min(int(box[2]), out_w - x); hb = min(int(box[3]), out_h - y)
@@ -455,10 +478,11 @@ class VideoWorker(QThread):
                 color = (0, 200, 0) if name != "UNKNOWN" else (0, 0, 220)
                 cv2.rectangle(frame_disp, (x, y), (x+wb, y+hb), color, 2)
 
-                label = f"{name} {sim:.2f}  {gender}  {age_str}  {expression}"
+                label = f"{name} {sim:.2f}  {gender}  {age_str}  {expression}  {race}"
                 if self.debug_mode:
                     settled = tr.genderage_settled if tr else False
-                    label  += (f"  ID:{tid} Q:{tqual:.2f} GA:{'✓' if settled else '…'}")
+                    r_settled = tr.race_settled if tr else False
+                    label  += (f"  ID:{tid} Q:{tqual:.2f} GA:{'✓' if settled else '…'} R:{'✓' if r_settled else '…'}")
 
                 (tw_, th_), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                 lx = max(0, x); ly = max(th_+8, y)
@@ -564,9 +588,9 @@ class VideoWorker(QThread):
         return None
 
     def release_models(self) -> None:
-        for m in (self.scrfd, self.arcface, self.fairface, self.expression_recognizer):
+        for m in (self.scrfd, self.arcface, self.fairface, self.expression_recognizer, self.race_classifier):
             if m is not None:
                 try: m.destroy()
                 except Exception: pass
-        self.scrfd = self.arcface = self.fairface = self.expression_recognizer = None
+        self.scrfd = self.arcface = self.fairface = self.expression_recognizer = self.race_classifier = None
         gc.collect(); logger.info("ONNX sessions released.")

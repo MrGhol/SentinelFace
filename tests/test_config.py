@@ -14,6 +14,10 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.facial_expression_every_n, 3)
         self.assertEqual(cfg.facial_expression_conf_gate, 0.25)
         self.assertEqual(cfg.facial_expression_smooth_window, 10)
+        self.assertEqual(cfg.race_every_n, 3)
+        self.assertEqual(cfg.race_conf_gate, 0.25)
+        self.assertEqual(cfg.race_smooth_window, 10)
+        self.assertEqual(cfg.race_settle_votes, 5)
         
         # 2. JSON Override
         with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
@@ -63,6 +67,22 @@ class TestConfig(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             cli = {"facial_expression_smooth_window": 0}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"race_every_n": 0}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"race_conf_gate": 1.1}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"race_smooth_window": 0}
+            load_config("nonexistent.json", cli)
+
+        with self.assertRaises(ValueError):
+            cli = {"race_settle_votes": 0}
             load_config("nonexistent.json", cli)
 
 if __name__ == "__main__":
